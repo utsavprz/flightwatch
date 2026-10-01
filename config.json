@@ -55,7 +55,7 @@
     "windows_toast": false
   },
   "vpn": {
-    "enabled": false,
+    "enabled": true,
     "wireguard_exe": "C:\\Program Files\\WireGuard\\wireguard.exe",
     "configs_dir": "vpn_configs"
   },
