@@ -2,7 +2,7 @@
 
 on:
   schedule:
-    - cron: "*/15 * * * *"   # every 15 minutes (GitHub may start runs a few minutes late)
+    - cron: "7,22,37,52 * * * *"   # every 15 min, off the busy :00/:15/:30/:45 marks GitHub often delays
   workflow_dispatch:          # "Run workflow" button for a manual check
 
 permissions:
@@ -15,7 +15,7 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-24.04
-    timeout-minutes: 12
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
 

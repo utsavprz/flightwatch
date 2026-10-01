@@ -23,6 +23,7 @@ import random
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from pathlib import Path
 
@@ -57,10 +58,6 @@ def log(msg):
     print(line)
     with LOG_FILE.open("a", encoding="utf-8") as fh:
         fh.write(line + "\n")
-
-
-def pause():
-    time.sleep(random.uniform(2, 5))
 
 
 # --------------------------------------------------------------------------- search
@@ -188,56 +185,73 @@ def search_all(via, countries, alt_dests=()):
                             out=summary(out), back=summary(back) if back else None,
                             details=details, url=url))
 
+    # 1. Build every search up front.
+    #    The first country gets the full search (all airports, round trips and one-ways);
+    #    the other (rotating) country only re-checks Newark round trips, because country
+    #    settings have never changed a price on this domestic route.
+    jobs = {}  # key -> (query, departure-hour window)
     for country in countries:
-        where = country or "ip"
-        # Alternate NYC airports are searched on the first country only, to limit requests.
-        dests = [home] + (list(alt_dests) if country == countries[0] else [])
-        backs = {}  # (return date, airport) -> cheapest return one-way, shared by both outbound options
-
-        for opt in c["outbound_options"]:
-            day = short_day(opt["date"])
-            # Round trip. Google may price this as two separate tickets (out + back),
-            # which is fine: there is no connection between them to miss.
+        full = country == countries[0]
+        dests = [home] + (list(alt_dests) if full else [])
+        for i, opt in enumerate(c["outbound_options"]):
             for ret in c["return_dates"]:
                 for dest in dests:
-                    label = opt["label"] if dest == home else f"{opt['label']} → {dest}"
-                    q = query([leg(opt["date"], c["origin"], dest, opt),
-                               leg(ret, dest, c["origin"])], "round-trip", False)
-                    try:
-                        for f in usable(fetch(q, country), opt)[:3]:
-                            add(label, day, ret, "round trip", where, f.price, 2 * extra.get(dest, 0),
-                                f, None, q.url())
-                    except Exception as e:
-                        log(f"  round trip {label} back {ret} [{via}/{where}] failed: {e}")
-                    pause()
+                    # Google may price a round trip as two separate tickets (out + back), which
+                    # is fine: there is no connection between them to miss.
+                    jobs[("rt", country, i, ret, dest)] = (
+                        query([leg(opt["date"], c["origin"], dest, opt), leg(ret, dest, c["origin"])],
+                              "round-trip", False), opt)
+            if full and c.get("check_split_one_ways"):
+                # One-ways hide self-transfer itineraries (missed-connection risk).
+                for dest in dests:
+                    jobs[("out", country, i, dest)] = (
+                        query([leg(opt["date"], c["origin"], dest, opt)], "one-way", True), opt)
+        if full and c.get("check_split_one_ways"):
+            for ret in c["return_dates"]:
+                for dest in dests:
+                    jobs[("back", country, ret, dest)] = (
+                        query([leg(ret, dest, c["origin"])], "one-way", True), {})
 
-            if not c.get("check_split_one_ways"):
+    # 2. Run them a few at a time, retrying once on failure.
+    def run(key):
+        q, opt = jobs[key]
+        for attempt in (1, 2):
+            try:
+                time.sleep(random.uniform(0, 1.5))
+                return key, usable(fetch(q, key[1]), opt)
+            except Exception as e:
+                if attempt == 2:
+                    log(f"  search {key} [{via}] failed: {e}")
+                time.sleep(3)
+        return key, []
+
+    with ThreadPoolExecutor(max_workers=c.get("parallel_searches", 4)) as pool:
+        found = dict(pool.map(run, jobs))
+
+    # 3. Turn search results into priced options.
+    for key, flights in found.items():
+        if key[0] != "rt" or not flights:
+            continue
+        _, country, i, ret, dest = key
+        opt = c["outbound_options"][i]
+        label = opt["label"] if dest == home else f"{opt['label']} → {dest}"
+        for f in flights[:3]:
+            add(label, short_day(opt["date"]), ret, "round trip", country or "ip", f.price,
+                2 * extra.get(dest, 0), f, None, jobs[key][0].url())
+
+    # Two one-ways, mixing airports (e.g. into LGA, home from EWR).
+    for key, outs in found.items():
+        if key[0] != "out" or not outs:
+            continue
+        _, country, i, od = key
+        opt, o = c["outbound_options"][i], outs[0]
+        for bkey, backs in found.items():
+            if bkey[0] != "back" or bkey[1] != country or not backs:
                 continue
-            # Two one-ways, mixing airports (e.g. into LGA, home from EWR).
-            # Self-transfer itineraries (missed-connection risk) are hidden.
-            outs = {}
-            for dest in dests:
-                try:
-                    q_out = query([leg(opt["date"], c["origin"], dest, opt)], "one-way", True)
-                    found = usable(fetch(q_out, country), opt)
-                    if found:
-                        outs[dest] = (found[0], q_out.url())
-                    pause()
-                    for ret in c["return_dates"]:
-                        if (ret, dest) not in backs:
-                            q_ret = query([leg(ret, dest, c["origin"])], "one-way", True)
-                            found = usable(fetch(q_ret, country), {})
-                            backs[(ret, dest)] = found[0] if found else None
-                            pause()
-                except Exception as e:
-                    log(f"  one-ways {opt['label']} {dest} [{via}/{where}] failed: {e}")
-            for od, (o, url) in outs.items():
-                for (ret, rd), b in backs.items():
-                    if not b:
-                        continue
-                    airports = "" if od == rd == home else f" → {od}, back from {rd}"
-                    add(opt["label"] + airports, day, ret, "2 one-ways", where, o.price + b.price,
-                        extra.get(od, 0) + extra.get(rd, 0), o, b, url)
+            ret, rd, b = bkey[2], bkey[3], backs[0]
+            airports = "" if od == rd == home else f" → {od}, back from {rd}"
+            add(opt["label"] + airports, short_day(opt["date"]), ret, "2 one-ways", country or "ip",
+                o.price + b.price, extra.get(od, 0) + extra.get(rd, 0), o, b, jobs[key][0].url())
     return results
 
 
@@ -401,7 +415,17 @@ def build_message(results, alerts, state, prev_best):
     name = lambda code: f"{AIRPORT_NAMES.get(code, code)} ({code})" if code in AIRPORT_NAMES else code
 
     deals = grouped(results)
-    best, others = deals[0], deals[1:1 + c.get("alternatives", 2)]
+    best, others, seen = deals[0], [], set()
+    for g in deals:
+        # Same flights booked as a round trip or as two one-ways count as one option.
+        gb = g["back"] or {}
+        key = (g["price"], g["out"]["airline"], g["out"]["to"], g["ret"], gb.get("frm", g["out"]["to"]))
+        if key in seen:
+            continue
+        seen.add(key)
+        if g is not best:
+            others.append(g)
+    others = others[: c.get("alternatives", 2)]
     o, b = best["out"], best["back"]
     times = " or ".join(best["times"][:2])
     ret_day = best["ret_day"]
@@ -441,7 +465,12 @@ def build_message(results, alerts, state, prev_best):
         L += ["", "<b>Next best</b>"]
         for i, g in enumerate(others, 2):
             go, gb = g["out"], g["back"]
-            extra = f"back on {gb['airline']}" if gb else "round trip"
+            if not gb:
+                extra = "round trip"
+            elif gb["frm"] != go["to"]:
+                extra = f"back on {gb['airline']} from {AIRPORT_NAMES.get(gb['frm'], gb['frm'])}"
+            else:
+                extra = f"back on {gb['airline']}"
             if g["ground"]:
                 extra += ", incl. travel to NJ"
             L.append(f"{i}. <b>{each(g['price'])} each</b> · {g['day'][:3]} {g['times'][0]} → "
@@ -524,8 +553,15 @@ def main():
     results = search_all("direct", countries, alt) + vpn_searches()
     if not results:
         log("No results this run (Google may have rate-limited us). Will retry next run.")
+        state["fail_streak"] = state.get("fail_streak", 0) + 1
+        if state["fail_streak"] == 3:  # warn once, not every run
+            telegram("⚠️ <b>FlightWatch problem:</b> the last 3 checks found no flights "
+                     "(Google may be blocking it). I'll keep trying; check prices manually meanwhile.")
         STATE_FILE.write_text(json.dumps(state, indent=2))
         return
+    if state.get("fail_streak", 0) >= 3:
+        telegram("✅ FlightWatch is working again.", silent=True)
+    state["fail_streak"] = 0
     save_csv(results)
 
     best = min(results, key=lambda r: r["price"])
