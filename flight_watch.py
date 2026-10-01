@@ -415,17 +415,7 @@ def build_message(results, alerts, state, prev_best):
     name = lambda code: f"{AIRPORT_NAMES.get(code, code)} ({code})" if code in AIRPORT_NAMES else code
 
     deals = grouped(results)
-    best, others, seen = deals[0], [], set()
-    for g in deals:
-        # Same flights booked as a round trip or as two one-ways count as one option.
-        gb = g["back"] or {}
-        key = (g["price"], g["out"]["airline"], g["out"]["to"], g["ret"], gb.get("frm", g["out"]["to"]))
-        if key in seen:
-            continue
-        seen.add(key)
-        if g is not best:
-            others.append(g)
-    others = others[: c.get("alternatives", 2)]
+    best = deals[0]
     o, b = best["out"], best["back"]
     times = " or ".join(best["times"][:2])
     ret_day = best["ret_day"]
@@ -433,7 +423,7 @@ def build_message(results, alerts, state, prev_best):
     L = []
     if alerts:
         L += [f"\U0001F6A8 <b>{html.escape(' | '.join(alerts))}</b>", ""]
-    L += [f"✈️ <b>St. Louis → Newark, NJ</b> · {n} people",
+    L += [f"✈️ <b>St. Louis → Newark / LaGuardia</b> · {n} people",
           f"<i>Checked {t12((datetime.now().hour, datetime.now().minute))}</i>",
           "",
           f"\U0001F4B0 <b>BEST: {each(best['price'])} each</b>  (${best['price']} total)",
@@ -461,21 +451,34 @@ def build_message(results, alerts, state, prev_best):
                  f"\U0001F4C9 Down {each(-diff)} each since last check" if diff < 0 else
                  f"\U0001F4C8 Up {each(diff)} each since last check")
 
-    if others:
-        L += ["", "<b>Next best</b>"]
-        for i, g in enumerate(others, 2):
+    # Separate round-trip rankings for the main airports (same airport both ways, ticket price only).
+    for code in c.get("ranked_airports", ["EWR", "LGA"]):
+        rows, seen = [], set()
+        for g in deals:
+            gb = g["back"]
+            if g["out"]["to"] != code or (gb and gb["frm"] != code):
+                continue
+            # The same flights booked as a round trip or as two one-ways count once.
+            key = (g["fare"], g["out"]["airline"], g["ret"], gb["airline"] if gb else g["out"]["airline"])
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append(g)
+        rows.sort(key=lambda g: g["fare"])
+        if not rows:
+            continue
+        note = f" <i>(+~{each(2 * c['airport_extra_cost'][code])} each to NJ)</i>" \
+            if code in c.get("airport_extra_cost", {}) else ""
+        L += ["", f"\U0001F3C6 <b>{AIRPORT_NAMES.get(code, code)} ({code}) round trips</b>{note}"]
+        for i, g in enumerate(rows[: c.get("ranking_per_airport", 3)], 1):
             go, gb = g["out"], g["back"]
-            if not gb:
-                extra = "round trip"
-            elif gb["frm"] != go["to"]:
-                extra = f"back on {gb['airline']} from {AIRPORT_NAMES.get(gb['frm'], gb['frm'])}"
-            else:
-                extra = f"back on {gb['airline']}"
-            if g["ground"]:
-                extra += ", incl. travel to NJ"
-            L.append(f"{i}. <b>{each(g['price'])} each</b> · {g['day'][:3]} {g['times'][0]} → "
-                     f"{AIRPORT_NAMES.get(go['to'], go['to'])} · back {g['ret_day'][:3]}")
-            L.append(f"      {html.escape(go['airline'])}, {go['stops']} · {html.escape(extra)}")
+            line2 = f"{html.escape(go['airline'])}, {go['stops']}"
+            if gb:
+                line2 += (" · 2 one-way tickets" if gb["airline"] == go["airline"]
+                          else f" · back on {html.escape(gb['airline'])}, {gb['stops']}")
+            L.append(f"{i}. <b>{each(g['fare'])} each</b> · {g['day'][:3]} {' or '.join(g['times'][:2])}"
+                     f" · back {g['ret_day'][:3]}")
+            L.append(f"      {line2}")
 
     L += ["", "<b>Cheapest by dates</b> (per person)"]
     for opt in c["outbound_options"]:
@@ -490,17 +493,17 @@ def build_message(results, alerts, state, prev_best):
             L.append(f"{short_day(opt['date'])[:3]} out: " + " · ".join(cells))
 
     # Cheapest whole trip per airline (same airline both ways, any airport/dates).
-    by_airline = {}
+    by_airline = {}  # airline -> (ticket price, airport)
     for r in results:
-        a = r["out"]["airline"]
-        if r["back"] and r["back"]["airline"] != a:
+        a, to = r["out"]["airline"], r["out"]["to"]
+        if "/" in a or (r["back"] and (r["back"]["airline"] != a or r["back"]["frm"] != to)):
             continue
-        if "/" in a:
-            continue
-        by_airline[a] = min(by_airline.get(a, r["price"]), r["price"])
+        if a not in by_airline or r["fare"] < by_airline[a][0]:
+            by_airline[a] = (r["fare"], to)
     if by_airline:
         L += ["", "<b>By airline</b> (per person, round trip)"]
-        L.append(" · ".join(f"{a} {each(p)}" for a, p in sorted(by_airline.items(), key=lambda x: x[1])))
+        L.append(" · ".join(f"{a} {each(p)} {to}"
+                                 for a, (p, to) in sorted(by_airline.items(), key=lambda x: x[1][0])))
 
     best_date = next(o["date"] for o in c["outbound_options"] if best["option"].startswith(o["label"]))
     links = site_links(best_date, best["ret"])

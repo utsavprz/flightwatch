@@ -45,7 +45,6 @@
   "crazy_drop": 100,
   "critical_repeats": 3,
   "min_drop_to_alert": 10,
-  "alternatives": 2,
   "stop_after": "2026-10-21",
   "telegram": {
     "bot_token": "",
@@ -59,5 +58,10 @@
     "enabled": false,
     "wireguard_exe": "C:\\Program Files\\WireGuard\\wireguard.exe",
     "configs_dir": "vpn_configs"
-  }
+  },
+  "ranked_airports": [
+    "EWR",
+    "LGA"
+  ],
+  "ranking_per_airport": 3
 }
