@@ -1,0 +1,56 @@
+{
+  "origin": "STL",
+  "destination": "EWR",
+  "adults": 2,
+  "return_date": "2026-10-25",
+  "outbound_options": [
+    {
+      "label": "Tue Oct 20 (any time)",
+      "date": "2026-10-20"
+    },
+    {
+      "label": "Wed Oct 21 (morning)",
+      "date": "2026-10-21",
+      "earliest_hour": 5,
+      "latest_hour": 10
+    }
+  ],
+  "alt_destinations": [
+    "LGA",
+    "JFK"
+  ],
+  "alt_every_n_runs": 1,
+  "airport_extra_cost": {
+    "LGA": 50,
+    "JFK": 60
+  },
+  "check_split_one_ways": true,
+  "max_stops": 1,
+  "google_countries": [
+    "us",
+    "gb",
+    "in",
+    "mx",
+    "br"
+  ],
+  "target_total_price": 600,
+  "great_total_price": 500,
+  "crazy_drop": 100,
+  "critical_repeats": 3,
+  "min_drop_to_alert": 10,
+  "alternatives": 2,
+  "stop_after": "2026-10-21",
+  "telegram": {
+    "bot_token": "",
+    "chat_id": ""
+  },
+  "telegram_every_run": true,
+  "notify": {
+    "windows_toast": false
+  },
+  "vpn": {
+    "enabled": false,
+    "wireguard_exe": "C:\\Program Files\\WireGuard\\wireguard.exe",
+    "configs_dir": "vpn_configs"
+  }
+}

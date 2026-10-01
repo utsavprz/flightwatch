@@ -1,0 +1,26 @@
+{
+  "run_no": 5,
+  "lowest": 647,
+  "last_best": {
+    "option": "Wed Oct 21 (morning)",
+    "day": "Wed Oct 21",
+    "kind": "round trip",
+    "via": "direct",
+    "country": "us",
+    "price": 647,
+    "fare": 647,
+    "ground": 0,
+    "out": {
+      "airline": "United",
+      "frm": "STL",
+      "to": "EWR",
+      "dep": "7:30 AM",
+      "arr": "11:00 AM",
+      "stops": "nonstop"
+    },
+    "back": null,
+    "details": "OUT United STL 7:30 AM -> EWR 11:00 AM (nonstop)",
+    "url": "https://www.google.com/travel/flights/search?tfs=GiASCjIwMjYtMTAtMjEoAUAFSApqBRIDU1RMcgUSA0VXUhocEgoyMDI2LTEwLTI1KAFqBRIDRVdScgUSA1NUTEICAQFIAZgBAQ==&hl=en&curr=USD"
+  },
+  "last_run": "2026-09-30T18:44"
+}
