@@ -1,9 +1,9 @@
 """
 FlightWatch - watches Google Flights for STL -> EWR (2 adults, max 1 stop) and reports to Telegram.
 
-Each run (every 15 min via Task Scheduler):
+Each run (every 15 min via Task Scheduler or GitHub Actions):
   1. Searches every outbound option (Tue any time / Wed morning) as a round trip and as
-     two one-ways, for the home country plus one rotating other country (and optional VPN configs).
+     two one-ways, for the home country plus one rotating other country, and through each WireGuard VPN config.
   2. Sends a silent ranked price list to Telegram, with links to Kayak, Momondo, Skyscanner, etc.
   3. Alerts with sound on a new low / under target; CRITICAL (3 messages + alarm toast)
      under the "great" price or on a sudden big drop.
@@ -22,8 +22,10 @@ import os
 import random
 import subprocess
 import sys
+import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from datetime import date, datetime
 from pathlib import Path
 
@@ -100,6 +102,8 @@ def parse_all(page):
 def fetch(query, country):
     """Fetch and parse a Google Flights results page. country='' lets Google use the IP."""
     client = Client(impersonate="chrome_145", impersonate_os="macos", referer=True, cookie_store=True)
+    # Pre-accepted cookie consent, so VPN exits in Europe get results instead of the consent page.
+    client.set_cookies("https://www.google.com", {"SOCS": "CAESEwgDEgk0ODE3Nzk3MjQaAmVuIAEaBgiA_LyaBg"})
     params = query.params()
     if country:
         params["gl"] = country
@@ -255,7 +259,7 @@ def search_all(via, countries, alt_dests=()):
     return results
 
 
-# --------------------------------------------------------------------------- VPN (optional)
+# --------------------------------------------------------------------------- VPN
 
 def is_admin():
     try:
@@ -264,32 +268,120 @@ def is_admin():
         return False
 
 
-def vpn_searches():
-    v = CONFIG["vpn"]
-    if not v.get("enabled"):
-        return []
-    wg = v["wireguard_exe"]
-    confs = sorted((HERE / v["configs_dir"]).glob("*.conf"))
-    if not Path(wg).exists() or not confs:
-        log("  VPN enabled but WireGuard or .conf files not found - skipping VPN pass")
-        return []
-    if not is_admin():
-        log("  VPN enabled but not running as administrator - skipping VPN pass")
-        return []
+def vpn_configs():
+    """(name, text) of every WireGuard config: .conf files in configs_dir, plus the VPN_CONFIGS
+    environment variable (a GitHub secret). That variable can hold several configs, each
+    starting at its [Interface] line, optionally preceded by a "### name" line."""
+    confs = [(p.stem, p.read_text()) for p in sorted((HERE / CONFIG["vpn"]["configs_dir"]).glob("*.conf"))]
+    name, lines = None, []
 
+    def flush():
+        if any(l.strip() == "[Interface]" for l in lines):
+            confs.append((name or f"vpn{len(confs) + 1}", "\n".join(lines) + "\n"))
+
+    for line in os.environ.get("VPN_CONFIGS", "").splitlines():
+        s = line.strip()
+        if s.startswith("###"):
+            flush()
+            name, lines = s.lstrip("#").strip(), []
+        elif s == "[Interface]" and any(l.strip() == "[Interface]" for l in lines):
+            flush()
+            name, lines = None, [line]
+        else:
+            lines.append(line)
+    flush()
+    return confs
+
+
+def sh(*cmd):
+    p = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    if p.returncode:
+        raise RuntimeError(f"{' '.join(cmd[:3])} failed: {(p.stderr or p.stdout).strip()[-300:]}")
+
+
+@contextmanager
+def windows_tunnel(i, name, text):
+    wg = CONFIG["vpn"]["wireguard_exe"]
+    if not Path(wg).exists():
+        raise RuntimeError("WireGuard not found")
+    if not is_admin():
+        raise RuntimeError("not running as administrator")
+    conf = Path(tempfile.gettempdir()) / f"{name}.conf"
+    conf.write_text(text)
+    try:
+        sh(wg, "/installtunnelservice", str(conf))
+        time.sleep(8)
+        yield
+    finally:
+        subprocess.run([wg, "/uninstalltunnelservice", name], timeout=60)
+        time.sleep(3)
+
+
+@contextmanager
+def linux_tunnel(i, name, text):
+    """wg-quick on Linux (GitHub Actions runner). The runner keeps its own DNS resolver, routed
+    outside the tunnel, so the config needs no resolvconf; web traffic goes through the VPN."""
+    sudo = [] if os.geteuid() == 0 else ["sudo"]
+    no_v6 = Path("/proc/sys/net/ipv6/conf/all/disable_ipv6").read_text().strip() == "1"
+    out = []
+    for line in text.splitlines():
+        key, _, val = line.partition("=")
+        if key.strip().lower() == "dns":
+            continue
+        if no_v6 and key.strip().lower() in ("address", "allowedips"):
+            line = f"{key.strip()} = " + ", ".join(a.strip() for a in val.split(",") if ":" not in a)
+        out.append(line)
+    conf = Path(tempfile.gettempdir()) / f"fwvpn{i}.conf"
+    conf.write_text("\n".join(out) + "\n")
+    conf.chmod(0o600)
+
+    resolvers = []
+    for f in ("/run/systemd/resolve/resolv.conf", "/etc/resolv.conf"):
+        if Path(f).exists():
+            resolvers += [l.split()[1] for l in Path(f).read_text().splitlines()
+                          if l.startswith("nameserver") and not l.split()[1].startswith("127.")]
+    resolvers = sorted(set(r for r in resolvers if ":" not in r))
+    for r in resolvers:
+        subprocess.run(sudo + ["ip", "rule", "add", "to", r, "lookup", "main", "pref", "100"], timeout=10)
+    try:
+        sh(*sudo, "wg-quick", "up", str(conf))
+        try:
+            time.sleep(2)
+            yield
+        finally:
+            subprocess.run(sudo + ["wg-quick", "down", str(conf)], capture_output=True, timeout=60)
+    finally:
+        for r in resolvers:
+            subprocess.run(sudo + ["ip", "rule", "del", "to", r, "lookup", "main", "pref", "100"], timeout=10)
+        conf.unlink(missing_ok=True)
+
+
+def exit_location():
+    """Public IP and country the outside world sees, to confirm the tunnel is up."""
+    trace = dict(l.split("=", 1) for l in
+                 requests.get("https://www.cloudflare.com/cdn-cgi/trace", timeout=15).text.splitlines() if "=" in l)
+    return f"{trace.get('ip')} ({trace.get('loc')})"
+
+
+def vpn_searches():
+    if not CONFIG["vpn"].get("enabled"):
+        return []
+    confs = vpn_configs()
+    if not confs:
+        log("  VPN enabled but no WireGuard configs found - skipping VPN pass")
+        return []
+    tunnel = windows_tunnel if os.name == "nt" else linux_tunnel
     results = []
-    for conf in confs:
-        name = conf.stem
+    for i, (name, text) in enumerate(confs):
         log(f"  VPN: connecting {name}")
         try:
-            subprocess.run([wg, "/installtunnelservice", str(conf)], check=True, timeout=60)
-            time.sleep(8)
-            results += search_all(f"vpn:{name}", [""])
+            with tunnel(i, name, text):
+                log(f"  VPN {name}: exit {exit_location()}")
+                found = search_all(f"vpn:{name}", [""])
+                log(f"  VPN {name}: {len(found)} prices")
+                results += found
         except Exception as e:
             log(f"  VPN {name} failed: {e}")
-        finally:
-            subprocess.run([wg, "/uninstalltunnelservice", name], timeout=60)
-            time.sleep(3)
     return results
 
 
@@ -320,7 +412,7 @@ def site_links(out_date, r):
                     f"&ddate={out_date}&rdate={r}&triptype=rt&class=y&quantity={n}",
         "Kayak": f"https://www.kayak.com/flights/{o}-{d}/{out_date}/{r}/{n}adults?sort=price_a&fs=stops=~1",
         "Momondo": f"https://www.momondo.com/flight-search/{o}-{d}/{out_date}/{r}/{n}adults?sort=price_a",
-        "Cheapflights": f"https://www.cheapflights.com/flight-search/{o}-{d}/{out_date}/{r}/{n}adults?sort=price_a",
+        "Cheapflights": f"https://www.cheapflights.com/flight-search/{o}-{d}/{out_date}/{r}/{n}adults?sort=price_a&fs=stops=~1",
         "Skyscanner": f"https://www.skyscanner.com/transport/flights/{o.lower()}/{d.lower()}/"
                       f"{ymd(out_date)}/{ymd(r)}/?adultsv2={n}&rtn=1",
         "Expedia": f"https://www.expedia.com/Flights-Search?trip=roundtrip&leg1=from:{o},to:{d},"
@@ -510,7 +602,7 @@ def build_message(results, alerts, state, prev_best):
     sw = (f"https://www.southwest.com/air/booking/select-depart.html?adultPassengersCount={n}"
           f"&departureDate={best_date}&destinationAirportCode=LGA&originationAirportCode={c['origin']}"
           f"&returnDate={best['ret']}&tripType=roundtrip&fareType=USD&passengerType=ADULT")
-    shown = {"Southwest": sw, **{k: links[k] for k in ("United", "Kayak", "Expedia", "Skyscanner")}}
+    shown = {"Southwest": sw, **{k: links[k] for k in ("United", "Cheapflights", "Kayak", "Expedia", "Skyscanner")}}
     L += ["", "\U0001F50E Check: " + " · ".join(
         f'<a href="{html.escape(u)}">{k}</a>' for k, u in shown.items())]
     return "\n".join(L)
@@ -553,7 +645,13 @@ def main():
     log(f"Run started (countries: {', '.join(countries)})")
 
     alt = CONFIG.get("alt_destinations", []) if run_no % CONFIG.get("alt_every_n_runs", 4) == 0 else []
-    results = search_all("direct", countries, alt) + vpn_searches()
+    vpn = vpn_searches()
+    if CONFIG["vpn"].get("enabled"):
+        state["vpn_fail_streak"] = 0 if vpn else state.get("vpn_fail_streak", 0) + 1
+        if state["vpn_fail_streak"] == 3:  # warn once, not every run
+            telegram("⚠️ <b>FlightWatch:</b> the VPN checks found nothing for the last 3 runs "
+                     "(VPN down or not set up). Direct checks continue.", silent=True)
+    results = search_all("direct", countries, alt) + vpn
     if not results:
         log("No results this run (Google may have rate-limited us). Will retry next run.")
         state["fail_streak"] = state.get("fail_streak", 0) + 1

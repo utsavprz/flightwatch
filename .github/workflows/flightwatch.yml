@@ -1,21 +1,23 @@
-﻿name: FlightWatch
+name: FlightWatch
 
 on:
   schedule:
-    - cron: "7,22,37,52 * * * *"   # every 15 min, off the busy :00/:15/:30/:45 marks GitHub often delays
-  workflow_dispatch:          # "Run workflow" button for a manual check
+    # Only (re)starts the checking loop below. GitHub runs scheduled jobs late or skips them
+    # (a 15-min cron got ~3 runs a day), so one job checks every 15 min for ~5.5 hours instead.
+    - cron: "7 */3 * * *"
+  workflow_dispatch:          # "Run workflow" button to start the loop now
 
 permissions:
   contents: write             # to save state.json (lowest price seen, last best) between runs
 
 concurrency:
   group: flightwatch
-  cancel-in-progress: false
+  cancel-in-progress: false   # a newer run waits for the current loop to end, then takes over
 
 jobs:
   check:
     runs-on: ubuntu-24.04
-    timeout-minutes: 8
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
 
@@ -26,23 +28,55 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      - name: Check flights
+      - name: Set up VPN
+        continue-on-error: true   # direct checks still run if this fails
+        env:
+          VPN_CONFIGS: ${{ secrets.VPN_CONFIGS }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq wireguard-tools
+          if [ -z "$VPN_CONFIGS" ]; then
+            # No VPN_CONFIGS secret: fall back to a free Cloudflare WARP WireGuard tunnel.
+            gh release download -R ViRb3/wgcf -p '*_linux_amd64' -O "$RUNNER_TEMP/wgcf"
+            chmod +x "$RUNNER_TEMP/wgcf"
+            mkdir -p vpn_configs && cd vpn_configs
+            "$RUNNER_TEMP/wgcf" register --accept-tos
+            "$RUNNER_TEMP/wgcf" generate
+            mv wgcf-profile.conf warp.conf
+          fi
+
+      - name: Check flights every 15 minutes
         env:
           TZ: America/Chicago
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python flight_watch.py
-
-      - name: Save state
+          VPN_CONFIGS: ${{ secrets.VPN_CONFIGS }}
         run: |
           git config user.name "flightwatch-bot"
           git config user.email "actions@users.noreply.github.com"
-          git add state.json
-          git diff --cached --quiet && exit 0
-          git commit -m "Update price state"
-          # Another run may have saved state meanwhile; keep this run's (newest) state.
-          for i in 1 2 3; do
-            git pull --rebase -X theirs && git push && exit 0
-            sleep 5
+          end=$((SECONDS + 330 * 60))
+          while :; do
+            start=$SECONDS
+            git pull -q --rebase -X theirs || true   # pick up config/code edits pushed meanwhile
+            if python -c 'import json, sys, datetime as d; sys.exit(0 if d.date.today().isoformat() > json.load(open("config.json"))["stop_after"] else 1)'; then
+              echo "Trip window has passed - stopping."
+              break
+            fi
+
+            timeout -s INT -k 30s 10m python flight_watch.py || echo "::warning::flight check failed"
+
+            git add state.json
+            if ! git diff --cached --quiet; then
+              git commit -qm "Update price state"
+              # Keep this run's (newest) state if anything else pushed meanwhile.
+              for i in 1 2 3; do
+                git pull -q --rebase -X theirs && git push -q && break
+                sleep 5
+              done
+            fi
+
+            wait=$((900 - (SECONDS - start)))
+            [ $((SECONDS + wait)) -lt $end ] || break
+            [ $wait -gt 0 ] && sleep $wait
           done
-          exit 1
