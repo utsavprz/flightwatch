@@ -68,8 +68,16 @@ def fetch(query, country):
     params = query.params()
     if country:
         params["gl"] = country
-    page = client.get(GOOGLE_URL, params=params).text
-    return [f for f in parse(page) if f.price and f.price > 0]
+    resp = client.get(GOOGLE_URL, params=params)
+    page = resp.text
+    try:
+        flights = [f for f in parse(page) if f.price and f.price > 0]
+    except Exception as e:
+        log(f"    google [{country or 'ip'}] HTTP {resp.status_code}, {len(page)} bytes, unparseable: {e}")
+        raise
+    if not flights:
+        log(f"    google [{country or 'ip'}] HTTP {resp.status_code}, {len(page)} bytes, 0 priced flights")
+    return flights
 
 
 def leg(d, frm, to, opt=None):
