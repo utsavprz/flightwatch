@@ -1,5 +1,5 @@
 {
-  "run_no": 21,
+  "run_no": 20,
   "lowest": 586,
   "last_best": {
     "option": "Tue Oct 20 (any time)",
@@ -24,8 +24,7 @@
     "details": "OUT United STL 7:30 AM -> EWR 11:00 AM (nonstop) | back 2026-10-24",
     "url": "https://www.google.com/travel/flights/search?tfs=GhwSCjIwMjYtMTAtMjAoAWoFEgNTVExyBRIDRVdSGhwSCjIwMjYtMTAtMjQoAWoFEgNFV1JyBRIDU1RMQgIBAUgBmAEB&hl=en&curr=USD"
   },
-  "last_run": "2026-10-01T16:13",
+  "last_run": "2026-10-01T16:02",
   "target_alerted_at": 586,
-  "fail_streak": 0,
-  "vpn_fail_streak": 0
+  "fail_streak": 0
 }
