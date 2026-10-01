@@ -1,5 +1,5 @@
 {
-  "run_no": 8,
+  "run_no": 9,
   "lowest": 647,
   "last_best": {
     "option": "Wed Oct 21 (morning) \u2192 LGA, back from EWR",
@@ -29,5 +29,5 @@
     "details": "OUT Delta STL 10:14 AM -> LGA 3:39 PM (1 stop in ATL) + BACK Frontier EWR 6:00 AM -> STL 11:13 PM (1 stop in MCO) (fare $667 + ~$50 ground to NJ)",
     "url": "https://www.google.com/travel/flights/search?tfs=GiASCjIwMjYtMTAtMjEoAUAFSApqBRIDU1RMcgUSA0xHQUICAQFIAYgBAZgBAg==&hl=en&curr=USD"
   },
-  "last_run": "2026-09-30T19:25"
+  "last_run": "2026-09-30T19:28"
 }
