@@ -28,8 +28,11 @@ from pathlib import Path
 
 import requests
 from fast_flights import FlightQuery, Passengers, create_query
-from fast_flights.parser import parse
+from fast_flights.exceptions import FlightsNotFound
+from fast_flights.model import Airport, CarbonEmission, Flights, SimpleDatetime, SingleFlight
+from fast_flights.parser import _parse_time
 from primp import Client
+from selectolax.lexbor import LexborHTMLParser
 
 HERE = Path(__file__).resolve().parent
 CONFIG_FILE = HERE / "config.json"
@@ -62,6 +65,41 @@ def pause():
 
 # --------------------------------------------------------------------------- search
 
+def parse_all(page):
+    """Parse BOTH of Google's result lists.
+
+    fast-flights only reads payload[3] ("other flights"); payload[2] ("top flights")
+    often holds the cheapest fares, e.g. the United nonstops.
+    """
+    js = LexborHTMLParser(page).css_first(r"script.ds\:1")
+    if js is None:
+        raise FlightsNotFound("no results script in page")
+    data = js.text().split("data:", 1)[1].rsplit(",", 1)[0]
+    if data.endswith("errorHasStatus: true"):
+        raise FlightsNotFound("no flights found; received error")
+    payload = json.loads(data)
+
+    flights = []
+    for block in (payload[2], payload[3]):
+        if not block or not block[0]:
+            continue
+        for k in block[0]:
+            try:
+                f = k[0]
+                segs = []
+                for s in f[2]:
+                    segs.append(SingleFlight(
+                        from_airport=Airport(code=s[3], name=s[4]), to_airport=Airport(code=s[6], name=s[5]),
+                        departure=SimpleDatetime(date=tuple(s[20]), time=_parse_time(s[8])),
+                        arrival=SimpleDatetime(date=tuple(s[21]), time=_parse_time(s[10])),
+                        duration=s[11], plane_type=s[17]))
+                flights.append(Flights(type=f[0], price=k[1][0][1], airlines=f[1], flights=segs,
+                                       carbon=CarbonEmission(typical_on_route=f[22][8], emission=f[22][7])))
+            except (IndexError, TypeError):
+                continue  # entries without a price or with an unexpected shape
+    return flights
+
+
 def fetch(query, country):
     """Fetch and parse a Google Flights results page. country='' lets Google use the IP."""
     client = Client(impersonate="chrome_145", impersonate_os="macos", referer=True, cookie_store=True)
@@ -71,7 +109,7 @@ def fetch(query, country):
     resp = client.get(GOOGLE_URL, params=params)
     page = resp.text
     try:
-        flights = [f for f in parse(page) if f.price and f.price > 0]
+        flights = [f for f in parse_all(page) if f.price and f.price > 0]
     except Exception as e:
         log(f"    google [{country or 'ip'}] HTTP {resp.status_code}, {len(page)} bytes, unparseable: {e}")
         raise
