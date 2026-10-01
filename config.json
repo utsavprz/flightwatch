@@ -1,6 +1,7 @@
 {
   "origin": "STL",
   "destination": "EWR",
+  "return_from": "LGA",
   "adults": 2,
   "return_dates": [
     "2026-10-24",
@@ -10,12 +11,6 @@
     {
       "label": "Tue Oct 20 (any time)",
       "date": "2026-10-20"
-    },
-    {
-      "label": "Wed Oct 21 (morning)",
-      "date": "2026-10-21",
-      "earliest_hour": 5,
-      "latest_hour": 10
     }
   ],
   "alt_destinations": [
