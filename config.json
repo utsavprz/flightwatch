@@ -2,7 +2,10 @@
   "origin": "STL",
   "destination": "EWR",
   "adults": 2,
-  "return_date": "2026-10-25",
+  "return_dates": [
+    "2026-10-24",
+    "2026-10-25"
+  ],
   "outbound_options": [
     {
       "label": "Tue Oct 20 (any time)",

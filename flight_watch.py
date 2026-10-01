@@ -108,6 +108,11 @@ def usable(flights, opt):
     return sorted(ok, key=lambda f: f.price)
 
 
+def short_day(iso):
+    d = date.fromisoformat(iso)
+    return f"{d:%a %b} {d.day}"
+
+
 def t12(hm):
     h, m = hm
     return f"{h % 12 or 12}:{m:02d} {'AM' if h < 12 else 'PM'}"
@@ -135,36 +140,38 @@ def search_all(via, countries, alt_dests=()):
     extra = c.get("airport_extra_cost", {})  # ground cost to get between that airport and NJ, per direction
     results = []
 
-    def add(label, day, kind, where, fare, ground, out, back, url):
-        details = f"OUT {describe(out)}" + (f" + BACK {describe(back)}" if back else "")
+    def add(label, day, ret, kind, where, fare, ground, out, back, url):
+        details = f"OUT {describe(out)}" + (f" + BACK {describe(back)}" if back else "") + f" | back {ret}"
         if ground:
             details += f" (fare ${fare} + ~${ground} ground to NJ)"
         # `price` is the effective cost used for ranking and alerts.
-        results.append(dict(option=label, day=day, kind=kind, via=via, country=where, price=fare + ground,
-                            fare=fare, ground=ground, out=summary(out),
-                            back=summary(back) if back else None, details=details, url=url))
+        results.append(dict(option=label, day=day, ret=ret, ret_day=short_day(ret), kind=kind, via=via,
+                            country=where, price=fare + ground, fare=fare, ground=ground,
+                            out=summary(out), back=summary(back) if back else None,
+                            details=details, url=url))
 
     for country in countries:
         where = country or "ip"
         # Alternate NYC airports are searched on the first country only, to limit requests.
         dests = [home] + (list(alt_dests) if country == countries[0] else [])
-        backs = {}  # return one-ways, shared by both outbound options
+        backs = {}  # (return date, airport) -> cheapest return one-way, shared by both outbound options
 
         for opt in c["outbound_options"]:
-            day = f"{date.fromisoformat(opt['date']):%a %b} {date.fromisoformat(opt['date']).day}"
+            day = short_day(opt["date"])
             # Round trip. Google may price this as two separate tickets (out + back),
             # which is fine: there is no connection between them to miss.
-            for dest in dests:
-                label = opt["label"] if dest == home else f"{opt['label']} → {dest}"
-                q = query([leg(opt["date"], c["origin"], dest, opt),
-                           leg(c["return_date"], dest, c["origin"])], "round-trip", False)
-                try:
-                    for f in usable(fetch(q, country), opt)[:3]:
-                        add(label, day, "round trip", where, f.price, 2 * extra.get(dest, 0),
-                            f, None, q.url())
-                except Exception as e:
-                    log(f"  round trip {label} [{via}/{where}] failed: {e}")
-                pause()
+            for ret in c["return_dates"]:
+                for dest in dests:
+                    label = opt["label"] if dest == home else f"{opt['label']} → {dest}"
+                    q = query([leg(opt["date"], c["origin"], dest, opt),
+                               leg(ret, dest, c["origin"])], "round-trip", False)
+                    try:
+                        for f in usable(fetch(q, country), opt)[:3]:
+                            add(label, day, ret, "round trip", where, f.price, 2 * extra.get(dest, 0),
+                                f, None, q.url())
+                    except Exception as e:
+                        log(f"  round trip {label} back {ret} [{via}/{where}] failed: {e}")
+                    pause()
 
             if not c.get("check_split_one_ways"):
                 continue
@@ -178,19 +185,20 @@ def search_all(via, countries, alt_dests=()):
                     if found:
                         outs[dest] = (found[0], q_out.url())
                     pause()
-                    if dest not in backs:
-                        q_ret = query([leg(c["return_date"], dest, c["origin"])], "one-way", True)
-                        found = usable(fetch(q_ret, country), {})
-                        backs[dest] = found[0] if found else None
-                        pause()
+                    for ret in c["return_dates"]:
+                        if (ret, dest) not in backs:
+                            q_ret = query([leg(ret, dest, c["origin"])], "one-way", True)
+                            found = usable(fetch(q_ret, country), {})
+                            backs[(ret, dest)] = found[0] if found else None
+                            pause()
                 except Exception as e:
                     log(f"  one-ways {opt['label']} {dest} [{via}/{where}] failed: {e}")
             for od, (o, url) in outs.items():
-                for rd, b in backs.items():
+                for (ret, rd), b in backs.items():
                     if not b:
                         continue
                     airports = "" if od == rd == home else f" → {od}, back from {rd}"
-                    add(opt["label"] + airports, day, "2 one-ways", where, o.price + b.price,
+                    add(opt["label"] + airports, day, ret, "2 one-ways", where, o.price + b.price,
                         extra.get(od, 0) + extra.get(rd, 0), o, b, url)
     return results
 
@@ -235,9 +243,9 @@ def vpn_searches():
 
 # --------------------------------------------------------------------------- links
 
-def site_links(out_date):
+def site_links(out_date, r):
     c = CONFIG
-    o, d, r, n = c["origin"], c["destination"], c["return_date"], c["adults"]
+    o, d, n = c["origin"], c["destination"], c["adults"]
     ymd = lambda s: s[2:].replace("-", "")
     mdy = lambda s: f"{s[5:7]}/{s[8:10]}/{s[:4]}"
     days = (date.fromisoformat(r) - date.fromisoformat(out_date)).days
@@ -338,7 +346,7 @@ def grouped(results):
     groups = {}
     for r in sorted(results, key=lambda r: r["price"]):
         b = r["back"] or {}
-        key = (r["day"], r["kind"], r["price"], r["out"]["airline"], r["out"]["stops"], r["out"]["to"],
+        key = (r["day"], r["ret"], r["kind"], r["price"], r["out"]["airline"], r["out"]["stops"], r["out"]["to"],
                b.get("airline"), b.get("frm"))
         if key not in groups:
             groups[key] = dict(r, times=[])
@@ -352,19 +360,18 @@ def build_message(results, alerts, state, prev_best):
     n = c["adults"]
     each = lambda total: f"${total / n:.0f}"
     name = lambda code: f"{AIRPORT_NAMES.get(code, code)} ({code})" if code in AIRPORT_NAMES else code
-    ret = date.fromisoformat(c["return_date"])
-    ret_day = f"{ret:%a %b} {ret.day}"
 
     deals = grouped(results)
     best, others = deals[0], deals[1:1 + c.get("alternatives", 2)]
     o, b = best["out"], best["back"]
     times = " or ".join(best["times"][:2])
+    ret_day = best["ret_day"]
 
     L = []
     if alerts:
         L += [f"\U0001F6A8 <b>{html.escape(' | '.join(alerts))}</b>", ""]
     L += [f"✈️ <b>St. Louis → Newark, NJ</b> · {n} people",
-          f"<i>Checked {t12((datetime.now().hour, datetime.now().minute))} · back {ret_day}</i>",
+          f"<i>Checked {t12((datetime.now().hour, datetime.now().minute))}</i>",
           "",
           f"\U0001F4B0 <b>BEST: {each(best['price'])} each</b>  (${best['price']} total)",
           f"\U0001F6EB {best['day']} · <b>{times}</b> → {name(o['to'])}",
@@ -399,18 +406,23 @@ def build_message(results, alerts, state, prev_best):
             if g["ground"]:
                 extra += ", incl. travel to NJ"
             L.append(f"{i}. <b>{each(g['price'])} each</b> · {g['day'][:3]} {g['times'][0]} → "
-                     f"{AIRPORT_NAMES.get(go['to'], go['to'])}")
+                     f"{AIRPORT_NAMES.get(go['to'], go['to'])} · back {g['ret_day'][:3]}")
             L.append(f"      {html.escape(go['airline'])}, {go['stops']} · {html.escape(extra)}")
 
-    L += ["", "<b>Cheapest by day</b>"]
+    L += ["", "<b>Cheapest by dates</b> (per person)"]
     for opt in c["outbound_options"]:
-        mine = [r for r in results if r["option"].startswith(opt["label"])]
-        if mine:
-            cheapest_day = min(mine, key=lambda r: r["price"])
-            L.append(f"{cheapest_day['day']}: {each(cheapest_day['price'])} each")
+        cells = []
+        for ret in c["return_dates"]:
+            mine = [r for r in results if r["option"].startswith(opt["label"]) and r["ret"] == ret]
+            if mine:
+                p = min(r["price"] for r in mine)
+                cell = f"back {short_day(ret)[:3]} {each(p)}"
+                cells.append(f"<b>{cell}</b>" if p == best["price"] else cell)
+        if cells:
+            L.append(f"{short_day(opt['date'])[:3]} out: " + " · ".join(cells))
 
     best_date = next(o["date"] for o in c["outbound_options"] if best["option"].startswith(o["label"]))
-    links = site_links(best_date)
+    links = site_links(best_date, best["ret"])
     L += ["", "\U0001F50E Compare: " + " · ".join(
         f'<a href="{html.escape(links[k])}">{k}</a>' for k in ("Kayak", "Skyscanner", "Expedia", "Momondo"))]
     return "\n".join(L)
