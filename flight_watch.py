@@ -460,10 +460,27 @@ def build_message(results, alerts, state, prev_best):
         if cells:
             L.append(f"{short_day(opt['date'])[:3]} out: " + " · ".join(cells))
 
+    # Cheapest whole trip per airline (same airline both ways, any airport/dates).
+    by_airline = {}
+    for r in results:
+        a = r["out"]["airline"]
+        if r["back"] and r["back"]["airline"] != a:
+            continue
+        if "/" in a:
+            continue
+        by_airline[a] = min(by_airline.get(a, r["price"]), r["price"])
+    if by_airline:
+        L += ["", "<b>By airline</b> (per person, round trip)"]
+        L.append(" · ".join(f"{a} {each(p)}" for a, p in sorted(by_airline.items(), key=lambda x: x[1])))
+
     best_date = next(o["date"] for o in c["outbound_options"] if best["option"].startswith(o["label"]))
     links = site_links(best_date, best["ret"])
-    L += ["", "\U0001F50E Compare: " + " · ".join(
-        f'<a href="{html.escape(links[k])}">{k}</a>' for k in ("Kayak", "Skyscanner", "Expedia", "Momondo"))]
+    sw = (f"https://www.southwest.com/air/booking/select-depart.html?adultPassengersCount={n}"
+          f"&departureDate={best_date}&destinationAirportCode=LGA&originationAirportCode={c['origin']}"
+          f"&returnDate={best['ret']}&tripType=roundtrip&fareType=USD&passengerType=ADULT")
+    shown = {"Southwest": sw, **{k: links[k] for k in ("United", "Kayak", "Expedia", "Skyscanner")}}
+    L += ["", "\U0001F50E Check: " + " · ".join(
+        f'<a href="{html.escape(u)}">{k}</a>' for k, u in shown.items())]
     return "\n".join(L)
 
 
