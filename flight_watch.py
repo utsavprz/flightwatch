@@ -376,7 +376,8 @@ def telegram_setup(quiet=False):
 
 # --------------------------------------------------------------------------- report
 
-AIRPORT_NAMES = {"EWR": "Newark", "LGA": "LaGuardia", "JFK": "JFK", "STL": "St. Louis"}
+AIRPORT_NAMES = {"EWR": "Newark", "LGA": "LaGuardia", "JFK": "JFK", "PHL": "Philadelphia",
+                 "TTN": "Trenton", "STL": "St. Louis"}
 
 
 def grouped(results):

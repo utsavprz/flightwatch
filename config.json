@@ -20,12 +20,16 @@
   ],
   "alt_destinations": [
     "LGA",
-    "JFK"
+    "JFK",
+    "PHL",
+    "TTN"
   ],
   "alt_every_n_runs": 1,
   "airport_extra_cost": {
     "LGA": 50,
-    "JFK": 60
+    "JFK": 60,
+    "PHL": 60,
+    "TTN": 50
   },
   "check_split_one_ways": true,
   "max_stops": 1,
