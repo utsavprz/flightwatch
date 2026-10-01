@@ -1,26 +1,33 @@
 {
-  "run_no": 5,
+  "run_no": 6,
   "lowest": 647,
   "last_best": {
-    "option": "Wed Oct 21 (morning)",
+    "option": "Wed Oct 21 (morning) \u2192 LGA, back from EWR",
     "day": "Wed Oct 21",
-    "kind": "round trip",
+    "kind": "2 one-ways",
     "via": "direct",
     "country": "us",
-    "price": 647,
-    "fare": 647,
-    "ground": 0,
+    "price": 717,
+    "fare": 667,
+    "ground": 50,
     "out": {
-      "airline": "United",
+      "airline": "Delta",
       "frm": "STL",
-      "to": "EWR",
-      "dep": "7:30 AM",
-      "arr": "11:00 AM",
-      "stops": "nonstop"
+      "to": "LGA",
+      "dep": "10:14 AM",
+      "arr": "3:39 PM",
+      "stops": "1 stop in ATL"
     },
-    "back": null,
-    "details": "OUT United STL 7:30 AM -> EWR 11:00 AM (nonstop)",
-    "url": "https://www.google.com/travel/flights/search?tfs=GiASCjIwMjYtMTAtMjEoAUAFSApqBRIDU1RMcgUSA0VXUhocEgoyMDI2LTEwLTI1KAFqBRIDRVdScgUSA1NUTEICAQFIAZgBAQ==&hl=en&curr=USD"
+    "back": {
+      "airline": "Frontier",
+      "frm": "EWR",
+      "to": "STL",
+      "dep": "6:00 AM",
+      "arr": "11:13 PM",
+      "stops": "1 stop in MCO"
+    },
+    "details": "OUT Delta STL 10:14 AM -> LGA 3:39 PM (1 stop in ATL) + BACK Frontier EWR 6:00 AM -> STL 11:13 PM (1 stop in MCO) (fare $667 + ~$50 ground to NJ)",
+    "url": "https://www.google.com/travel/flights/search?tfs=GiASCjIwMjYtMTAtMjEoAUAFSApqBRIDU1RMcgUSA0xHQUICAQFIAYgBAZgBAg==&hl=en&curr=USD"
   },
-  "last_run": "2026-09-30T18:44"
+  "last_run": "2026-09-30T19:21"
 }
