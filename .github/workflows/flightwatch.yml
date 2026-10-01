@@ -1,4 +1,4 @@
-name: FlightWatch
+﻿name: FlightWatch
 
 on:
   schedule:
@@ -29,6 +29,7 @@ jobs:
       - name: Check flights
         env:
           TZ: America/Chicago
+          FW_DEBUG: "1"
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python flight_watch.py

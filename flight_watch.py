@@ -77,6 +77,9 @@ def fetch(query, country):
         raise
     if not flights:
         log(f"    google [{country or 'ip'}] HTTP {resp.status_code}, {len(page)} bytes, 0 priced flights")
+    elif os.environ.get("FW_DEBUG"):
+        legs = " / ".join(f"{d.from_airport.airport}-{d.to_airport.airport} {d.date}" for d in query.flight_data)
+        log(f"    google [{country or 'ip'}] {legs}: {sorted(f.price for f in flights)[:5]}")
     return flights
 
 
