@@ -177,9 +177,13 @@ def search_all(via, countries, alt_dests=()):
     c = CONFIG
     home = c["destination"]
     extra = c.get("airport_extra_cost", {})  # ground cost to get between that airport and NJ, per direction
+    # "return_from" set: only two one-ways, out to `destination` and back from that airport.
+    back_from = c.get("return_from")
+    if back_from:
+        alt_dests, extra = (), {}  # airports chosen explicitly: rank by ticket price alone
     results = []
 
-    def add(label, day, ret, kind, where, fare, ground, out, back, url):
+    def add(label, day, ret, kind, where, fare, ground, out, back, url, back_url=None):
         details = f"OUT {describe(out)}" + (f" + BACK {describe(back)}" if back else "") + f" | back {ret}"
         if ground:
             details += f" (fare ${fare} + ~${ground} ground to NJ)"
@@ -187,7 +191,7 @@ def search_all(via, countries, alt_dests=()):
         results.append(dict(option=label, day=day, ret=ret, ret_day=short_day(ret), kind=kind, via=via,
                             country=where, price=fare + ground, fare=fare, ground=ground,
                             out=summary(out), back=summary(back) if back else None,
-                            details=details, url=url))
+                            details=details, url=url, back_url=back_url))
 
     # 1. Build every search up front.
     #    The first country gets the full search (all airports, round trips and one-ways);
@@ -195,24 +199,24 @@ def search_all(via, countries, alt_dests=()):
     #    settings have never changed a price on this domestic route.
     jobs = {}  # key -> (query, departure-hour window)
     for country in countries:
-        full = country == countries[0]
+        full = country == countries[0] or bool(back_from)
         dests = [home] + (list(alt_dests) if full else [])
         for i, opt in enumerate(c["outbound_options"]):
-            for ret in c["return_dates"]:
+            for ret in ([] if back_from else c["return_dates"]):
                 for dest in dests:
                     # Google may price a round trip as two separate tickets (out + back), which
                     # is fine: there is no connection between them to miss.
                     jobs[("rt", country, i, ret, dest)] = (
                         query([leg(opt["date"], c["origin"], dest, opt), leg(ret, dest, c["origin"])],
                               "round-trip", False), opt)
-            if full and c.get("check_split_one_ways"):
+            if full and (c.get("check_split_one_ways") or back_from):
                 # One-ways hide self-transfer itineraries (missed-connection risk).
                 for dest in dests:
                     jobs[("out", country, i, dest)] = (
                         query([leg(opt["date"], c["origin"], dest, opt)], "one-way", True), opt)
-        if full and c.get("check_split_one_ways"):
+        if full and (c.get("check_split_one_ways") or back_from):
             for ret in c["return_dates"]:
-                for dest in dests:
+                for dest in [back_from] if back_from else dests:
                     jobs[("back", country, ret, dest)] = (
                         query([leg(ret, dest, c["origin"])], "one-way", True), {})
 
@@ -255,7 +259,8 @@ def search_all(via, countries, alt_dests=()):
             ret, rd, b = bkey[2], bkey[3], backs[0]
             airports = "" if od == rd == home else f" → {od}, back from {rd}"
             add(opt["label"] + airports, short_day(opt["date"]), ret, "2 one-ways", country or "ip",
-                o.price + b.price, extra.get(od, 0) + extra.get(rd, 0), o, b, jobs[key][0].url())
+                o.price + b.price, extra.get(od, 0) + extra.get(rd, 0), o, b, jobs[key][0].url(),
+                jobs[bkey][0].url())
     return results
 
 
@@ -401,6 +406,9 @@ def site_links(out_date, r):
            "options": {"cabin": "COACH", "stops": "-1", "extraStops": "1",
                        "allowAirportChanges": "true", "showOnlyAvailable": "true"},
            "pax": {"adults": str(n)}}
+    # Multi-city (out to d, back from return_from) when set, else a round trip.
+    bf = c.get("return_from")
+    kayak_trip = f"{o}-{d}/{out_date}/{bf}-{o}/{r}" if bf else f"{o}-{d}/{out_date}/{r}"
     ita_q = base64.b64encode(json.dumps(ita, separators=(",", ":")).encode()).decode()
     return {
         "Google": f"https://www.google.com/travel/flights?q=Flights%20from%20{o}%20to%20{d}%20on%20{out_date}"
@@ -410,9 +418,9 @@ def site_links(out_date, r):
                      f"{d}-{o}-{r.replace('-', '')}/?num-adults={n}",
         "Trip.com": f"https://www.trip.com/flights/showfarefirst?dcity={o.lower()}&acity={d.lower()}"
                     f"&ddate={out_date}&rdate={r}&triptype=rt&class=y&quantity={n}",
-        "Kayak": f"https://www.kayak.com/flights/{o}-{d}/{out_date}/{r}/{n}adults?sort=price_a&fs=stops=~1",
-        "Momondo": f"https://www.momondo.com/flight-search/{o}-{d}/{out_date}/{r}/{n}adults?sort=price_a",
-        "Cheapflights": f"https://www.cheapflights.com/flight-search/{o}-{d}/{out_date}/{r}/{n}adults?sort=price_a&fs=stops=~1",
+        "Kayak": f"https://www.kayak.com/flights/{kayak_trip}/{n}adults?sort=price_a&fs=stops=~1",
+        "Momondo": f"https://www.momondo.com/flight-search/{kayak_trip}/{n}adults?sort=price_a",
+        "Cheapflights": f"https://www.cheapflights.com/flight-search/{kayak_trip}/{n}adults?sort=price_a&fs=stops=~1",
         "Skyscanner": f"https://www.skyscanner.com/transport/flights/{o.lower()}/{d.lower()}/"
                       f"{ymd(out_date)}/{ymd(r)}/?adultsv2={n}&rtn=1",
         "Expedia": f"https://www.expedia.com/Flights-Search?trip=roundtrip&leg1=from:{o},to:{d},"
@@ -529,7 +537,11 @@ def build_message(results, alerts, state, prev_best):
         L += [f"\U0001F6EC {ret_day} · return included, pick the time on Google"]
     if best["ground"]:
         L.append(f"      <i>includes ~{each(best['ground'])} each to get to NJ</i>")
-    L.append(f"\U0001F449 <a href=\"{html.escape(best['url'])}\">Open this flight</a>")
+    if best.get("back_url"):
+        L.append(f"\U0001F449 Open on Google: <a href=\"{html.escape(best['url'])}\">outbound</a>"
+                 f" · <a href=\"{html.escape(best['back_url'])}\">return</a>")
+    else:
+        L.append(f"\U0001F449 <a href=\"{html.escape(best['url'])}\">Open this flight</a>")
 
     L.append("")
     goal = c["target_total_price"]
