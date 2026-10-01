@@ -102,6 +102,8 @@ def parse_all(page):
 def fetch(query, country):
     """Fetch and parse a Google Flights results page. country='' lets Google use the IP."""
     client = Client(impersonate="chrome_145", impersonate_os="macos", referer=True, cookie_store=True)
+    # Pre-accepted cookie consent, so VPN exits in Europe get results instead of the consent page.
+    client.set_cookies("https://www.google.com", {"SOCS": "CAESEwgDEgk0ODE3Nzk3MjQaAmVuIAEaBgiA_LyaBg"})
     params = query.params()
     if country:
         params["gl"] = country
@@ -375,7 +377,9 @@ def vpn_searches():
         try:
             with tunnel(i, name, text):
                 log(f"  VPN {name}: exit {exit_location()}")
-                results += search_all(f"vpn:{name}", [""])
+                found = search_all(f"vpn:{name}", [""])
+                log(f"  VPN {name}: {len(found)} prices")
+                results += found
         except Exception as e:
             log(f"  VPN {name} failed: {e}")
     return results
@@ -408,7 +412,7 @@ def site_links(out_date, r):
                     f"&ddate={out_date}&rdate={r}&triptype=rt&class=y&quantity={n}",
         "Kayak": f"https://www.kayak.com/flights/{o}-{d}/{out_date}/{r}/{n}adults?sort=price_a&fs=stops=~1",
         "Momondo": f"https://www.momondo.com/flight-search/{o}-{d}/{out_date}/{r}/{n}adults?sort=price_a",
-        "Cheapflights": f"https://www.cheapflights.com/flight-search/{o}-{d}/{out_date}/{r}/{n}adults?sort=price_a",
+        "Cheapflights": f"https://www.cheapflights.com/flight-search/{o}-{d}/{out_date}/{r}/{n}adults?sort=price_a&fs=stops=~1",
         "Skyscanner": f"https://www.skyscanner.com/transport/flights/{o.lower()}/{d.lower()}/"
                       f"{ymd(out_date)}/{ymd(r)}/?adultsv2={n}&rtn=1",
         "Expedia": f"https://www.expedia.com/Flights-Search?trip=roundtrip&leg1=from:{o},to:{d},"
@@ -598,7 +602,7 @@ def build_message(results, alerts, state, prev_best):
     sw = (f"https://www.southwest.com/air/booking/select-depart.html?adultPassengersCount={n}"
           f"&departureDate={best_date}&destinationAirportCode=LGA&originationAirportCode={c['origin']}"
           f"&returnDate={best['ret']}&tripType=roundtrip&fareType=USD&passengerType=ADULT")
-    shown = {"Southwest": sw, **{k: links[k] for k in ("United", "Kayak", "Expedia", "Skyscanner")}}
+    shown = {"Southwest": sw, **{k: links[k] for k in ("United", "Cheapflights", "Kayak", "Expedia", "Skyscanner")}}
     L += ["", "\U0001F50E Check: " + " · ".join(
         f'<a href="{html.escape(u)}">{k}</a>' for k, u in shown.items())]
     return "\n".join(L)
