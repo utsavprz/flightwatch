@@ -1,10 +1,9 @@
 name: FlightWatch
 
 on:
-  schedule:
-    # Only (re)starts the checking loop below. GitHub runs scheduled jobs late or skips them
-    # (a 15-min cron got ~3 runs a day), so one job checks every 15 min for ~5.5 hours instead.
-    - cron: "7 */3 * * *"
+  # Stopped: no schedule. Re-add it to resume automatic checks:
+  #   schedule:
+  #     - cron: "7 */3 * * *"   # restarts the 15-min checking loop below
   workflow_dispatch:          # "Run workflow" button to start the loop now
 
 permissions:
