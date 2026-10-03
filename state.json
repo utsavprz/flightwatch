@@ -1,11 +1,11 @@
 {
-  "run_no": 147,
+  "run_no": 148,
   "lowest": 586,
   "last_best": {
     "option": "Tue Oct 20 (any time) \u2192 EWR, back from LGA",
     "day": "Tue Oct 20",
-    "ret": "2026-10-24",
-    "ret_day": "Sat Oct 24",
+    "ret": "2026-10-25",
+    "ret_day": "Sun Oct 25",
     "kind": "2 one-ways",
     "via": "direct",
     "country": "us",
@@ -21,19 +21,19 @@
       "stops": "nonstop"
     },
     "back": {
-      "airline": "Delta",
+      "airline": "Southwest",
       "frm": "LGA",
       "to": "STL",
-      "dep": "9:59 AM",
-      "arr": "11:47 AM",
+      "dep": "6:05 AM",
+      "arr": "7:45 AM",
       "stops": "nonstop"
     },
-    "details": "OUT United STL 7:30 AM -> EWR 11:00 AM (nonstop) + BACK Delta LGA 9:59 AM -> STL 11:47 AM (nonstop) | back 2026-10-24",
+    "details": "OUT United STL 7:30 AM -> EWR 11:00 AM (nonstop) + BACK Southwest LGA 6:05 AM -> STL 7:45 AM (nonstop) | back 2026-10-25",
     "url": "https://www.google.com/travel/flights/search?tfs=GhwSCjIwMjYtMTAtMjAoAWoFEgNTVExyBRIDRVdSQgIBAUgBiAEBmAEC&hl=en&curr=USD",
-    "back_url": "https://www.google.com/travel/flights/search?tfs=GhwSCjIwMjYtMTAtMjQoAWoFEgNMR0FyBRIDU1RMQgIBAUgBiAEBmAEC&hl=en&curr=USD"
+    "back_url": "https://www.google.com/travel/flights/search?tfs=GhwSCjIwMjYtMTAtMjUoAWoFEgNMR0FyBRIDU1RMQgIBAUgBiAEBmAEC&hl=en&curr=USD"
   },
-  "last_run": "2026-10-03T08:05",
+  "last_run": "2026-10-03T08:19",
   "target_alerted_at": 586,
   "fail_streak": 0,
-  "vpn_fail_streak": 1
+  "vpn_fail_streak": 0
 }
