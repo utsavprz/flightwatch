@@ -1,5 +1,5 @@
 {
-  "run_no": 142,
+  "run_no": 143,
   "lowest": 586,
   "last_best": {
     "option": "Tue Oct 20 (any time) \u2192 EWR, back from LGA",
@@ -32,7 +32,7 @@
     "url": "https://www.google.com/travel/flights/search?tfs=GhwSCjIwMjYtMTAtMjAoAWoFEgNTVExyBRIDRVdSQgIBAUgBiAEBmAEC&hl=en&curr=USD",
     "back_url": "https://www.google.com/travel/flights/search?tfs=GhwSCjIwMjYtMTAtMjQoAWoFEgNMR0FyBRIDU1RMQgIBAUgBiAEBmAEC&hl=en&curr=USD"
   },
-  "last_run": "2026-10-03T06:49",
+  "last_run": "2026-10-03T07:04",
   "target_alerted_at": 586,
   "fail_streak": 0,
   "vpn_fail_streak": 0
